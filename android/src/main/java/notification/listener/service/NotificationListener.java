@@ -43,7 +43,8 @@ public class NotificationListener extends NotificationListenerService {
     }
 
     @RequiresApi(api = VERSION_CODES.KITKAT)
-    private void handleNotification(StatusBarNotification notification, boolean isRemoved) {
+private void handleNotification(StatusBarNotification notification, boolean isRemoved) {
+    try {
         String packageName = notification.getPackageName();
         Bundle extras = notification.getNotification().extras;
         byte[] appIcon = getAppIcon(packageName);
@@ -70,21 +71,58 @@ public class NotificationListener extends NotificationListenerService {
             CharSequence title = extras.getCharSequence(Notification.EXTRA_TITLE);
             CharSequence text = extras.getCharSequence(Notification.EXTRA_TEXT);
 
-            intent.putExtra(NotificationConstants.NOTIFICATION_TITLE, title == null ? null : title.toString());
-            intent.putExtra(NotificationConstants.NOTIFICATION_CONTENT, text == null ? null : text.toString());
+            // Limitar tamaño del texto para evitar TransactionTooLargeException
+            String safeTitle = (title == null) ? null : 
+                (title.length() > 100 ? title.subSequence(0, 100) + "..." : title.toString());
+            
+            String safeText = (text == null) ? null : 
+                (text.length() > 500 ? text.subSequence(0, 500) + "..." : text.toString());
+                
+            intent.putExtra(NotificationConstants.NOTIFICATION_TITLE, safeTitle);
+            intent.putExtra(NotificationConstants.NOTIFICATION_CONTENT, safeText);
             intent.putExtra(NotificationConstants.IS_REMOVED, isRemoved);
-            intent.putExtra(NotificationConstants.HAVE_EXTRA_PICTURE, extras.containsKey(Notification.EXTRA_PICTURE));
+            
+            // Solo incluir imagen si la notificación no es demasiado grande
+            boolean containsImage = extras.containsKey(Notification.EXTRA_PICTURE);
+            intent.putExtra(NotificationConstants.HAVE_EXTRA_PICTURE, containsImage);
 
-            if (extras.containsKey(Notification.EXTRA_PICTURE)) {
-                Bitmap bmp = (Bitmap) extras.get(Notification.EXTRA_PICTURE);
-                ByteArrayOutputStream stream = new ByteArrayOutputStream();
-                bmp.compress(Bitmap.CompressFormat.PNG, 100, stream);
-                intent.putExtra(NotificationConstants.EXTRAS_PICTURE, stream.toByteArray());
+            if (containsImage) {
+                try {
+                    Bitmap bmp = (Bitmap) extras.get(Notification.EXTRA_PICTURE);
+                    if (bmp != null) {
+                        // Reducir tamaño de imagen si es muy grande
+                        Bitmap scaledBmp = bmp;
+                        if (bmp.getWidth() > 300 || bmp.getHeight() > 300) {
+                            int maxSize = 300;
+                            float ratio = Math.min(
+                                (float) maxSize / bmp.getWidth(),
+                                (float) maxSize / bmp.getHeight()
+                            );
+                            int width = Math.round(bmp.getWidth() * ratio);
+                            int height = Math.round(bmp.getHeight() * ratio);
+                            scaledBmp = Bitmap.createScaledBitmap(bmp, width, height, true);
+                        }
+                        
+                        ByteArrayOutputStream stream = new ByteArrayOutputStream();
+                        scaledBmp.compress(Bitmap.CompressFormat.JPEG, 70, stream);
+                        byte[] imageData = stream.toByteArray();
+                        
+                        // Solo incluir si no es demasiado grande
+                        if (imageData.length < 200000) { // 200KB límite
+                            intent.putExtra(NotificationConstants.EXTRAS_PICTURE, imageData);
+                        }
+                    }
+                } catch (Exception e) {
+                    // Ignorar errores de procesamiento de imagen
+                    Log.e("NotificationListener", "Error procesando imagen: " + e.getMessage());
+                }
             }
         }
         sendBroadcast(intent);
+    } catch (Exception e) {
+        Log.e("NotificationListener", "Error en handleNotification: " + e.getMessage());
     }
-
+}
 
     public byte[] getAppIcon(String packageName) {
         try {
