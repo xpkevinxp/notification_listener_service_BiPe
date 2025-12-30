@@ -5,6 +5,7 @@ import static notification.listener.service.models.ActionCache.cachedNotificatio
 
 import android.annotation.SuppressLint;
 import android.app.Notification;
+import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
@@ -30,9 +31,124 @@ import notification.listener.service.models.Action;
 @RequiresApi(api = VERSION_CODES.JELLY_BEAN_MR2)
 public class NotificationListener extends NotificationListenerService {
 
+    private static final String TAG = "NotificationListener";
+    
+    // Estado de conexión del listener - accesible desde el plugin
+    public static boolean isConnected = false;
+    
+    // Timestamp de última conexión para debugging
+    public static long lastConnectedTime = 0;
+    public static long lastDisconnectedTime = 0;
+
+    /**
+     * Llamado cuando el listener se conecta correctamente al sistema.
+     * Xiaomi puede llamar esto múltiples veces si reconecta el servicio.
+     */
+    @Override
+    public void onListenerConnected() {
+        super.onListenerConnected();
+        isConnected = true;
+        lastConnectedTime = System.currentTimeMillis();
+        Log.i(TAG, "✅ Listener CONECTADO correctamente al sistema");
+        
+        // Notificar a Flutter sobre la conexión
+        Intent intent = new Intent(NotificationConstants.INTENT);
+        intent.putExtra("connection_event", true);
+        intent.putExtra("is_connected", true);
+        intent.putExtra("timestamp", lastConnectedTime);
+        sendBroadcast(intent);
+    }
+
+    /**
+     * Llamado cuando el sistema desconecta el listener.
+     * En Xiaomi esto puede pasar silenciosamente - aquí intentamos reconectar.
+     */
+    @Override
+    public void onListenerDisconnected() {
+        super.onListenerDisconnected();
+        isConnected = false;
+        lastDisconnectedTime = System.currentTimeMillis();
+        Log.w(TAG, "⚠️ Listener DESCONECTADO por el sistema - Intentando reconectar...");
+        
+        // Notificar a Flutter sobre la desconexión
+        Intent intent = new Intent(NotificationConstants.INTENT);
+        intent.putExtra("connection_event", true);
+        intent.putExtra("is_connected", false);
+        intent.putExtra("timestamp", lastDisconnectedTime);
+        sendBroadcast(intent);
+        
+        // Intentar reconexión automática (API 24+)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            try {
+                requestRebind(new ComponentName(this, NotificationListener.class));
+                Log.i(TAG, "🔄 Solicitando reconexión con requestRebind()...");
+            } catch (Exception e) {
+                Log.e(TAG, "❌ Error al solicitar reconexión: " + e.getMessage());
+            }
+        }
+    }
+
+    /**
+     * Método estático para forzar reconexión desde el Plugin.
+     * Implementa el "Toggle del Componente" recomendado para Xiaomi.
+     */
+    public static void reconnectService(Context context) {
+        try {
+            PackageManager pm = context.getPackageManager();
+            ComponentName componentName = new ComponentName(context, NotificationListener.class);
+            
+            Log.i(TAG, "🔄 Iniciando Toggle del Componente para reconectar...");
+            
+            // 1. Deshabilitar el componente
+            pm.setComponentEnabledSetting(
+                componentName,
+                PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+                PackageManager.DONT_KILL_APP
+            );
+            
+            // Pequeña pausa para asegurar que el sistema procese el cambio
+            try {
+                Thread.sleep(100);
+            } catch (InterruptedException e) {
+                // Ignorar
+            }
+            
+            // 2. Habilitar el componente inmediatamente
+            pm.setComponentEnabledSetting(
+                componentName,
+                PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
+                PackageManager.DONT_KILL_APP
+            );
+            
+            Log.i(TAG, "✅ Toggle completado - El sistema debería reconectar el listener");
+            
+        } catch (Exception e) {
+            Log.e(TAG, "❌ Error en reconnectService: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Verifica si el listener puede obtener notificaciones activas.
+     * Este es el test real de si el "binder" está vivo o muerto.
+     */
+    public boolean isBinderAlive() {
+        try {
+            StatusBarNotification[] activeNotifications = getActiveNotifications();
+            return activeNotifications != null;
+        } catch (Exception e) {
+            Log.w(TAG, "Binder parece estar muerto: " + e.getMessage());
+            return false;
+        }
+    }
+
     @RequiresApi(api = VERSION_CODES.KITKAT)
     @Override
     public void onNotificationPosted(StatusBarNotification notification) {
+        // Actualizar estado de conexión - si recibimos notificaciones, estamos conectados
+        if (!isConnected) {
+            isConnected = true;
+            Log.i(TAG, "📥 Notificación recibida - Actualizando estado a CONECTADO");
+        }
         handleNotification(notification, false);
     }
 
