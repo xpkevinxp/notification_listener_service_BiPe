@@ -1,3 +1,7 @@
+## 0.3.5
+
+- Add onGoing flag for Notification
+  
 ## 0.3.4
 
 - Add namespace for android build.gradle

@@ -16,7 +16,7 @@ import android.os.Looper;
 import android.provider.Settings;
 import android.service.notification.NotificationListenerService;
 import android.util.Log;
-
+import android.content.ActivityNotFoundException;
 import androidx.annotation.NonNull;
 import androidx.annotation.RequiresApi;
 
@@ -32,6 +32,8 @@ import io.flutter.plugin.common.PluginRegistry;
 import notification.listener.service.models.Action;
 import notification.listener.service.models.ActionCache;
 
+import java.util.List;
+import java.util.Map;
 
 public class NotificationListenerServicePlugin implements FlutterPlugin, ActivityAware, MethodCallHandler, PluginRegistry.ActivityResultListener, EventChannel.StreamHandler {
 
@@ -63,7 +65,13 @@ public class NotificationListenerServicePlugin implements FlutterPlugin, Activit
             result.success(isPermissionGranted(context));
         } else if (call.method.equals("requestPermission")) {
             Intent intent = new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS);
-            mActivity.startActivityForResult(intent, REQUEST_CODE_FOR_NOTIFICATIONS);
+            try {
+                mActivity.startActivityForResult(intent, REQUEST_CODE_FOR_NOTIFICATIONS);
+                result.success(null);
+            } catch (ActivityNotFoundException e) {
+                Log.e("NotificationPlugin", "ActivityNotFoundException: " + e.getMessage());
+                result.error("ACTIVITY_NOT_FOUND", "No activity found to handle notification listener settings", null);
+            }
         } else if (call.method.equals("sendReply")) {
             final String message = call.argument("message");
             final int notificationId = call.argument("notificationId");
@@ -118,7 +126,16 @@ public class NotificationListenerServicePlugin implements FlutterPlugin, Activit
             } else {
                 result.error("API_LEVEL", "requestRebind requiere API 24+", null);
             }
-        } else {
+        } else if (call.method.equals("getActiveNotifications")) {
+            NotificationListener service = NotificationListener.getInstance();
+            if (service != null) {
+                List<Map<String, Object>> notifications = service.getActiveNotificationData();
+                result.success(notifications);
+            } else {
+                result.error("ServiceUnavailable", "NotificationService not running", null);
+            }
+        }
+        else {
             result.notImplemented();
         }
     }

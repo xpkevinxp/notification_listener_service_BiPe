@@ -19,6 +19,10 @@ import android.os.Bundle;
 import android.service.notification.NotificationListenerService;
 import android.service.notification.StatusBarNotification;
 import android.util.Log;
+import java.util.List;
+import java.util.Map;
+import java.util.ArrayList;
+import java.util.HashMap;
 
 import androidx.annotation.RequiresApi;
 
@@ -30,6 +34,17 @@ import notification.listener.service.models.Action;
 @SuppressLint("OverrideAbstract")
 @RequiresApi(api = VERSION_CODES.JELLY_BEAN_MR2)
 public class NotificationListener extends NotificationListenerService {
+    private static NotificationListener instance;
+
+    public static NotificationListener getInstance() {
+        return instance;
+    }
+
+    @Override
+    public void onListenerConnected() {
+        super.onListenerConnected();
+        instance = this;
+    }
 
     private static final String TAG = "NotificationListener";
     
@@ -163,6 +178,7 @@ private void handleNotification(StatusBarNotification notification, boolean isRe
     try {
         String packageName = notification.getPackageName();
         Bundle extras = notification.getNotification().extras;
+        boolean isOngoing = (notification.getNotification().flags & Notification.FLAG_ONGOING_EVENT) != 0;
         byte[] appIcon = getAppIcon(packageName);
         byte[] largeIcon = null;
         Action action = NotificationUtils.getQuickReplyAction(notification.getNotification(), packageName);
@@ -175,6 +191,7 @@ private void handleNotification(StatusBarNotification notification, boolean isRe
         intent.putExtra(NotificationConstants.PACKAGE_NAME, packageName);
         intent.putExtra(NotificationConstants.ID, notification.getId());
         intent.putExtra(NotificationConstants.CAN_REPLY, action != null);
+        intent.putExtra(NotificationConstants.IS_ONGOING, isOngoing);
 
         if (NotificationUtils.getQuickReplyAction(notification.getNotification(), packageName) != null) {
             cachedNotifications.put(notification.getId(), action);
@@ -271,6 +288,32 @@ private void handleNotification(StatusBarNotification notification, boolean isRe
             Log.d("ERROR LARGE ICON", "getNotificationLargeIcon: " + e.getMessage());
             return null;
         }
+    }
+
+    @RequiresApi(api = Build.VERSION_CODES.KITKAT)
+    public List<Map<String, Object>> getActiveNotificationData() {
+        List<Map<String, Object>> notificationList = new ArrayList<>();
+        StatusBarNotification[] activeNotifications = getActiveNotifications();
+
+        for (StatusBarNotification sbn : activeNotifications) {
+            Map<String, Object> notifData = new HashMap<>();
+            Notification notification = sbn.getNotification();
+            Bundle extras = notification.extras;
+
+            notifData.put("id", sbn.getId());
+            notifData.put("packageName", sbn.getPackageName());
+            notifData.put("title", extras.getCharSequence(Notification.EXTRA_TITLE) != null
+                    ? extras.getCharSequence(Notification.EXTRA_TITLE).toString()
+                    : null);
+            notifData.put("content", extras.getCharSequence(Notification.EXTRA_TEXT) != null
+                    ? extras.getCharSequence(Notification.EXTRA_TEXT).toString()
+                    : null);
+            boolean isOngoing = (notification.flags & Notification.FLAG_ONGOING_EVENT) != 0;
+            notifData.put("onGoing", isOngoing);
+
+            notificationList.add(notifData);
+        }
+        return notificationList;
     }
 
 }
